@@ -1,81 +1,75 @@
----
-
 kind: Template
 apiVersion: template.openshift.io/v1
 metadata:
   name: wordpress-mysql
   annotations:
-    openshift.io/display-name: WordPress + MySQL
+    openshift.io/display-name: WordPress y MySQL
     description: >
-      A WordPress application with a MySQL database using persistent storage
-      for WordPress uploads, WordPress plugins, and MySQL data.
+      Una aplicación Wordpress con una base de datos MySQL, que usan almacenamiento persistente
+      para guardar tanto lo que subamos a Wordpress como los datos de la base de datos.
     tags: instant-app,php,wordpress
     iconClass: icon-php
 labels:
   template: wordpress-mysql
-
-
+  app.kubernetes.io/part-of: wordpress
 parameters:
   - name: APPLICATION_NAME
     description: >
-      The name of the application that will be used as a prefix for services,
-      routes, images, etc
+      Nombre de la aplicación (será usada para los servicios, rutas, etc)
     value: wordpress
     required: true
 
   - name: SOURCE_REPOSITORY_URL
-    description: The URL of the repository with your application source code
+    description: La URL en la que se encuentra la aplicación Wordpress
     value: https://github.com/davidseg77/openshift-wordpress-1
     required: true
 
   - name: SOURCE_REPOSITORY_REF
     description: >
-      Set this to a branch name, tag or other ref of your repository if you
-      are not using the default branch
+       La rama, etiqueta, etc, en el que estará ubicada la aplicación.
+    value: main
+    required: true
 
   - name: CONTEXT_DIR
     description: >
-      Set this to the relative path to your project if it is not in the root
-      of your repository
+      La ruta relativa de la aplicación en el caso de no estar usando el directorio raíz.
     value: wordpress
 
   - name: GITHUB_WEBHOOK_SECRET
-    description: A secret string used to configure the GitHub webhook
+    description: Una cadena secreta que se usará a la hora de configurar el webhook de Github
     generate: expression
     from: "[a-zA-Z0-9]{40}"
 
   - name: APPLICATION_DOMAIN
     description: >
-      The exposed hostname that will route to the wordpress service, if left
-      blank a value will be defaulted
+      El nombre del dominio que se usará como ruta a la aplicación. Si se deja en blanco
+      se creará uno por defecto.
     value:
 
   - name: DATABASE_NAME
-    description: Database name
+    description: Nombre de la base de datos.
     value: wordpress
     required: true
 
   - name: DATABASE_USER
-    description: Database user name
+    description: Usuario de la base de datos.
     value: wordpress
     required: true
 
   - name: DATABASE_PASSWORD
-    description: Database user password
-    generate: expression
-    from: "[a-zA-Z0-9]{16}"
+    description: Contraseña de la base de datos.
+    value: wordpress
+    required: true
 
 
 objects:
-  #############################################################################
-  # WordPress Service
-  #############################################################################
+  # Servicio de WordPress
   - kind: Service
     apiVersion: v1
     metadata:
       name: ${APPLICATION_NAME}
       annotations:
-        description: Exposes and load balances the application pods
+        description: Expone y balancea la carga entre los pods de la aplicación.
         service.alpha.openshift.io/dependencies: "[{'name': '${APPLICATION_NAME}-mysql', 'kind': 'Service'}]"
     spec:
       ports:
@@ -85,9 +79,7 @@ objects:
       selector:
         name: ${APPLICATION_NAME}
 
-  #############################################################################
   # WordPress Route
-  #############################################################################
   - kind: Route
     apiVersion: v1
     metadata:
@@ -98,25 +90,19 @@ objects:
         kind: Service
         name: ${APPLICATION_NAME}
 
-  #############################################################################
   # WordPress ImageStream
-  #############################################################################
   - kind: ImageStream
     apiVersion: v1
     metadata:
       name: ${APPLICATION_NAME}
-      annotations:
-        description: Keeps track of changes in the application image
 
-  #############################################################################
   # WordPress BuildConfig
-  #############################################################################
   - kind: BuildConfig
     apiVersion: v1
     metadata:
       name: ${APPLICATION_NAME}
       annotations:
-        description: Defines how to build the application
+        description: Define como se construirá la aplicación
     spec:
       source:
         type: Git
@@ -130,7 +116,7 @@ objects:
           from:
             kind: ImageStreamTag
             namespace: openshift
-            name: php:5.6
+            name: 'php:latest'
       output:
         to:
           kind: ImageStreamTag
@@ -142,32 +128,40 @@ objects:
           github:
             secret: ${GITHUB_WEBHOOK_SECRET}
 
-  #############################################################################
-  # WordPress Uploads PersistentVolumeClaim
-  #############################################################################
+  # PersistentVolumeClaim de Wordpress
   - kind: PersistentVolumeClaim
     apiVersion: v1
     metadata:
-      name: ${APPLICATION_NAME}-uploads
+      name: ${APPLICATION_NAME}-subidas
     spec:
       accessModes:
-        - ReadWriteMany
+        - ReadWriteOnce
       resources:
         requests:
           storage: 1Gi
 
-  #############################################################################
+  # PersistentVolumeClaim de Wordpress 2
+  - kind: PersistentVolumeClaim
+    apiVersion: v1
+    metadata:
+      name: ${APPLICATION_NAME}-contenido
+    spec:
+      accessModes:
+        - ReadWriteOnce
+      resources:
+        requests:
+          storage: 1Gi
+
   # WordPress DeploymentConfig
-  #############################################################################
   - kind: DeploymentConfig
     apiVersion: v1
     metadata:
       name: ${APPLICATION_NAME}
       annotations:
-        description: Defines how to deploy the application server
+        description: Define como se desplegará la aplicación
     spec:
       strategy:
-        type: Rolling
+        type: Recreate
       triggers:
         - type: ImageChange
           imageChangeParams:
@@ -202,22 +196,26 @@ objects:
                 - name: WORDPRESS_DB_PASSWORD
                   value: ${DATABASE_PASSWORD}
               volumeMounts:
-                - name: ${APPLICATION_NAME}-uploads
-                  mountPath: /opt/app-root/src/pv-uploads
+                - name: ${APPLICATION_NAME}-subidas
+                  mountPath: /opt/app-root/src/pv-subidas
+                - name: ${APPLICATION_NAME}-contenido
+                  mountPath: /opt/app-root/src/wp-content/languages
+                  subPath: languages
           volumes:
-            - name: ${APPLICATION_NAME}-uploads
+            - name: ${APPLICATION_NAME}-subidas
               persistentVolumeClaim:
-                claimName: ${APPLICATION_NAME}-uploads
+                claimName: ${APPLICATION_NAME}-subidas
+            - name: ${APPLICATION_NAME}-contenido
+              persistentVolumeClaim:
+                claimName: ${APPLICATION_NAME}-contenido
 
-  #############################################################################
-  # MySQL Service
-  #############################################################################
+  # Servicio MySQL
   - kind: Service
     apiVersion: v1
     metadata:
       name: ${APPLICATION_NAME}-mysql
       annotations:
-        description: Exposes the database server
+        description: Expone el servidor de base de datos.
     spec:
       ports:
         - name: mysql
@@ -226,9 +224,7 @@ objects:
       selector:
         name: ${APPLICATION_NAME}-mysql
 
-  #############################################################################
   # MySQL PersistentVolumeClaim
-  #############################################################################
   - kind: PersistentVolumeClaim
     apiVersion: v1
     metadata:
@@ -240,15 +236,13 @@ objects:
         requests:
           storage: 1Gi
 
-  #############################################################################
   # MySQL DeploymentConfig
-  #############################################################################
   - kind: DeploymentConfig
     apiVersion: v1
     metadata:
       name: ${APPLICATION_NAME}-mysql
       annotations:
-        description: Defines how to deploy the database
+        description: Define como se despliega la base de datos
     spec:
       strategy:
         type: Recreate
@@ -265,7 +259,7 @@ objects:
         spec:
           containers:
             - name: mysql
-              image: openshift3/mysql-55-rhel7
+              image: image-registry.openshift-image-registry.svc:5000/openshift/mysql
               ports:
                 - containerPort: 3306
               env:
@@ -277,7 +271,7 @@ objects:
                   value: ${DATABASE_NAME}
               volumeMounts:
                 - name: ${APPLICATION_NAME}-mysql-data
-                  mountPath: /var/lib/mysql/data
+                  mountPath: /var/lib/mysql
           volumes:
             - name: ${APPLICATION_NAME}-mysql-data
               persistentVolumeClaim:
