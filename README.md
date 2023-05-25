@@ -1,3 +1,3 @@
-# Plantilla de wordpress para crear despliegue continuo en Openshift, by David Segura Tristancho (ASIR)
+# Plantilla de wordpress para crear despliegue continuo en Openshift, by David Segura Tristancho
 
 
